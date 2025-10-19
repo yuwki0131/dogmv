@@ -1,5 +1,5 @@
 use gtk4::prelude::*;
-use gtk4::{glib, Application, ApplicationWindow};
+use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType};
 use log::{error, info, warn};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
@@ -36,7 +36,7 @@ fn main() {
     // Use FLAGS_NONE to handle command-line arguments ourselves
     let app = Application::builder()
         .application_id(APP_ID)
-        .flags(gtk4::gio::ApplicationFlags::FLAGS_NONE)
+        .flags(gio::ApplicationFlags::FLAGS_NONE)
         .build();
 
     let file_path_clone = file_path.clone();
@@ -69,6 +69,9 @@ fn build_ui(app: &Application, file_path: &str) {
 
     // Setup file watcher
     setup_file_watcher(&webview, file_path);
+
+    // Setup keyboard shortcuts
+    setup_keyboard_shortcuts(&window, &webview, file_path);
 
     // Add WebView to window
     window.set_child(Some(&webview));
@@ -360,6 +363,110 @@ fn setup_file_watcher(webview: &WebView, file_path: &str) {
         }
         glib::ControlFlow::Continue
     });
+}
+
+fn setup_keyboard_shortcuts(window: &ApplicationWindow, webview: &WebView, file_path: &str) {
+    info!("Setting up keyboard shortcuts");
+
+    let controller = EventControllerKey::new();
+
+    let app_weak = window.application().and_then(|app| Some(app.downgrade()));
+    let window_weak = window.downgrade();
+    let webview_clone = webview.clone();
+    let file_path = file_path.to_string();
+
+    controller.connect_key_pressed(move |_, key, keycode, modifier| {
+        // Debug: Log all key presses
+        let key_name = key.name().map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
+        let unicode = key.to_unicode();
+        info!("Key pressed: keycode={}, keyval={:?}, name='{}', unicode={:?}, modifier={:?}",
+              keycode, key, key_name, unicode, modifier);
+
+        // Check for Ctrl key
+        if !modifier.contains(gdk::ModifierType::CONTROL_MASK) {
+            return glib::Propagation::Proceed;
+        }
+
+        info!("Ctrl key detected with modifier: {:?}", modifier);
+
+        // Use to_unicode() to get the character
+        if let Some(ch) = key.to_unicode() {
+            info!("Unicode character: '{}'", ch);
+            match ch {
+                'r' | 'R' => {
+                    // Ctrl+R: Reload
+                    info!("Ctrl+R pressed - Reloading");
+                    display_markdown(&webview_clone, &file_path);
+                    return glib::Propagation::Stop;
+                }
+                'q' | 'Q' => {
+                    // Ctrl+Q: Quit
+                    info!("Ctrl+Q pressed - Quitting");
+                    if let Some(app) = app_weak.as_ref().and_then(|w| w.upgrade()) {
+                        info!("Calling app.quit()");
+                        app.quit();
+                    } else {
+                        warn!("Could not upgrade app_weak");
+                    }
+                    return glib::Propagation::Stop;
+                }
+                'o' | 'O' => {
+                    // Ctrl+O: Open file
+                    info!("Ctrl+O pressed - Open file dialog");
+                    if let Some(window) = window_weak.upgrade() {
+                        open_file_dialog(&window, &webview_clone);
+                    }
+                    return glib::Propagation::Stop;
+                }
+                _ => {}
+            }
+        } else {
+            info!("No unicode character for this key");
+        }
+
+        glib::Propagation::Proceed
+    });
+
+    // IMPORTANT: Attach controller to WebView, not Window
+    // WebView captures all keyboard input, so we need to listen there
+    webview.add_controller(controller);
+    info!("Keyboard controller attached to WebView");
+}
+
+fn open_file_dialog(window: &ApplicationWindow, webview: &WebView) {
+    info!("Opening file dialog");
+
+    let dialog = FileChooserDialog::new(
+        Some("Open Markdown File"),
+        Some(window),
+        FileChooserAction::Open,
+        &[("_Cancel", ResponseType::Cancel), ("_Open", ResponseType::Accept)],
+    );
+
+    // Set file filter for markdown files
+    let filter = FileFilter::new();
+    filter.add_pattern("*.md");
+    filter.add_pattern("*.markdown");
+    filter.set_name(Some("Markdown files"));
+    dialog.add_filter(&filter);
+
+    let webview_clone = webview.clone();
+
+    dialog.connect_response(move |dialog, response| {
+        if response == ResponseType::Accept {
+            if let Some(file) = dialog.file() {
+                if let Some(path) = file.path() {
+                    if let Some(path_str) = path.to_str() {
+                        info!("Selected file: {}", path_str);
+                        display_markdown(&webview_clone, path_str);
+                    }
+                }
+            }
+        }
+        dialog.close();
+    });
+
+    dialog.show();
 }
 
 #[cfg(test)]
