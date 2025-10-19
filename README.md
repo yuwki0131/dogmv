@@ -2,6 +2,8 @@
 
 NixOS/Hyprland環境で動作するGUIベースのMarkdownビューアアプリケーション
 
+![dogmv Screenshot](img/screenshot.png)
+
 ## 現在のステータス
 
 ✅ **フェーズ1完了**: プロジェクト基盤構築
