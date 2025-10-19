@@ -1,8 +1,11 @@
 use gtk4::prelude::*;
-use gtk4::{Application, ApplicationWindow};
-use log::{error, info};
+use gtk4::{glib, Application, ApplicationWindow};
+use log::{error, info, warn};
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
 use std::path::Path;
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 use webkit6::prelude::*;
 use webkit6::WebView;
 
@@ -63,6 +66,9 @@ fn build_ui(app: &Application, file_path: &str) {
 
     // Load and display markdown
     display_markdown(&webview, file_path);
+
+    // Setup file watcher
+    setup_file_watcher(&webview, file_path);
 
     // Add WebView to window
     window.set_child(Some(&webview));
@@ -275,6 +281,85 @@ fn display_markdown(webview: &WebView, file_path: &str) {
             webview.load_html(&error_html, None);
         }
     }
+}
+
+fn setup_file_watcher(webview: &WebView, file_path: &str) {
+    info!("Setting up file watcher for: {}", file_path);
+
+    let file_path = file_path.to_string();
+    let file_path_for_thread = file_path.clone();
+
+    // Use Arc<Mutex<bool>> to signal file changes
+    let file_changed = Arc::new(Mutex::new(false));
+    let file_changed_clone = Arc::clone(&file_changed);
+
+    // Spawn a thread to handle file watching
+    std::thread::spawn(move || {
+        // Create a channel for file system events
+        let (event_tx, event_rx) = mpsc::channel::<Result<Event, notify::Error>>();
+
+        // Create a watcher
+        let mut watcher = match RecommendedWatcher::new(
+            move |res| {
+                if let Err(e) = event_tx.send(res) {
+                    warn!("Failed to send file event: {}", e);
+                }
+            },
+            Config::default().with_poll_interval(Duration::from_secs(1)),
+        ) {
+            Ok(w) => w,
+            Err(e) => {
+                error!("Failed to create file watcher: {}", e);
+                return;
+            }
+        };
+
+        // Watch the file
+        if let Err(e) = watcher.watch(Path::new(&file_path_for_thread), RecursiveMode::NonRecursive) {
+            error!("Failed to watch file: {}", e);
+            return;
+        }
+
+        info!("File watcher started successfully");
+
+        // Keep watcher alive and handle events
+        for res in event_rx {
+            match res {
+                Ok(event) => {
+                    // Check if it's a modification event
+                    if event.kind.is_modify() || event.kind.is_create() {
+                        info!("File changed: {:?}", event.kind);
+
+                        // Set the flag
+                        if let Ok(mut changed) = file_changed_clone.lock() {
+                            *changed = true;
+                        }
+
+                        // Small delay to avoid multiple rapid reloads
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
+                Err(e) => {
+                    warn!("File watch error: {}", e);
+                }
+            }
+        }
+    });
+
+    // Setup a periodic check on the main thread
+    let webview_clone = webview.clone();
+
+    glib::timeout_add_local(Duration::from_millis(500), move || {
+        // Check if file has changed
+        if let Ok(mut changed) = file_changed.lock() {
+            if *changed {
+                info!("Reloading file: {}", file_path);
+                display_markdown(&webview_clone, &file_path);
+                *changed = false;
+            }
+        }
+        glib::ControlFlow::Continue
+    });
 }
 
 #[cfg(test)]
