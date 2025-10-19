@@ -1,5 +1,5 @@
 use gtk4::prelude::*;
-use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType};
+use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType, MessageDialog, MessageType, ButtonsType};
 use log::{error, info, warn};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
@@ -14,12 +14,18 @@ const APP_ID: &str = "com.github.dogmv";
 fn main() {
     // Initialize logger
     env_logger::init();
-    info!("Starting dogmv - Markdown Viewer");
+    info!("Starting dogmv - Markdown Viewer v{}", env!("CARGO_PKG_VERSION"));
 
     // Parse CLI arguments
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        error!("Usage: dogmv <file.md>");
+        eprintln!("Error: No file specified");
+        eprintln!();
+        eprintln!("Usage: {} <file.md>", args.get(0).map(|s| s.as_str()).unwrap_or("dogmv"));
+        eprintln!();
+        eprintln!("Examples:");
+        eprintln!("  {} README.md", args.get(0).map(|s| s.as_str()).unwrap_or("dogmv"));
+        eprintln!("  {} /path/to/document.md", args.get(0).map(|s| s.as_str()).unwrap_or("dogmv"));
         std::process::exit(1);
     }
 
@@ -28,7 +34,19 @@ fn main() {
 
     // Check file exists
     if !Path::new(file_path).exists() {
-        error!("File not found: {}", file_path);
+        eprintln!("Error: File not found: {}", file_path);
+        eprintln!();
+        eprintln!("Please check that:");
+        eprintln!("  - The file path is correct");
+        eprintln!("  - The file exists");
+        eprintln!("  - You have permission to read the file");
+        std::process::exit(1);
+    }
+
+    // Check if file is readable
+    if let Err(e) = std::fs::metadata(file_path) {
+        eprintln!("Error: Cannot access file: {}", file_path);
+        eprintln!("Reason: {}", e);
         std::process::exit(1);
     }
 
@@ -276,14 +294,79 @@ fn display_markdown(webview: &WebView, file_path: &str) {
             info!("Markdown displayed successfully");
         }
         Err(e) => {
-            error!("Failed to load markdown file: {}", e);
-            let error_html = format!(
-                r#"<html><body><h1>Error</h1><p>Failed to load file: {}</p></body></html>"#,
-                e
+            error!("Failed to load markdown file '{}': {}", file_path, e);
+            let error_html = create_error_html(
+                "Failed to Load File",
+                &format!("Could not read file: {}\n\nError: {}", file_path, e)
             );
             webview.load_html(&error_html, None);
         }
     }
+}
+
+fn create_error_html(title: &str, message: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            padding: 40px;
+            max-width: 800px;
+            margin: 0 auto;
+            color: #24292e;
+        }}
+        h1 {{
+            color: #d73a49;
+            font-size: 2em;
+            margin-bottom: 20px;
+        }}
+        .error-message {{
+            background-color: #fff5f5;
+            border: 1px solid #feb2b2;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 20px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }}
+        .hint {{
+            color: #6a737d;
+            font-size: 0.9em;
+        }}
+    </style>
+</head>
+<body>
+    <h1>{}</h1>
+    <div class="error-message">{}</div>
+    <p class="hint">Try using Ctrl+O to open a different file, or check that the file exists and is readable.</p>
+</body>
+</html>"#,
+        title, message
+    )
+}
+
+#[allow(dead_code)]
+fn show_error_dialog(window: Option<&ApplicationWindow>, title: &str, message: &str) {
+    let dialog = MessageDialog::builder()
+        .message_type(MessageType::Error)
+        .buttons(ButtonsType::Ok)
+        .text(title)
+        .secondary_text(message)
+        .modal(true)
+        .build();
+
+    if let Some(win) = window {
+        dialog.set_transient_for(Some(win));
+    }
+
+    dialog.connect_response(|dialog, _| {
+        dialog.close();
+    });
+
+    dialog.show();
 }
 
 fn setup_file_watcher(webview: &WebView, file_path: &str) {
@@ -375,44 +458,32 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow, webview: &WebView, file_
     let webview_clone = webview.clone();
     let file_path = file_path.to_string();
 
-    controller.connect_key_pressed(move |_, key, keycode, modifier| {
-        // Debug: Log all key presses
-        let key_name = key.name().map(|s| s.to_string()).unwrap_or_else(|| "None".to_string());
-        let unicode = key.to_unicode();
-        info!("Key pressed: keycode={}, keyval={:?}, name='{}', unicode={:?}, modifier={:?}",
-              keycode, key, key_name, unicode, modifier);
-
+    controller.connect_key_pressed(move |_, key, _keycode, modifier| {
         // Check for Ctrl key
         if !modifier.contains(gdk::ModifierType::CONTROL_MASK) {
             return glib::Propagation::Proceed;
         }
 
-        info!("Ctrl key detected with modifier: {:?}", modifier);
-
         // Use to_unicode() to get the character
         if let Some(ch) = key.to_unicode() {
-            info!("Unicode character: '{}'", ch);
             match ch {
                 'r' | 'R' => {
                     // Ctrl+R: Reload
-                    info!("Ctrl+R pressed - Reloading");
+                    info!("Reloading file: {}", &file_path);
                     display_markdown(&webview_clone, &file_path);
                     return glib::Propagation::Stop;
                 }
                 'q' | 'Q' => {
                     // Ctrl+Q: Quit
-                    info!("Ctrl+Q pressed - Quitting");
+                    info!("Quitting application");
                     if let Some(app) = app_weak.as_ref().and_then(|w| w.upgrade()) {
-                        info!("Calling app.quit()");
                         app.quit();
-                    } else {
-                        warn!("Could not upgrade app_weak");
                     }
                     return glib::Propagation::Stop;
                 }
                 'o' | 'O' => {
                     // Ctrl+O: Open file
-                    info!("Ctrl+O pressed - Open file dialog");
+                    info!("Opening file dialog");
                     if let Some(window) = window_weak.upgrade() {
                         open_file_dialog(&window, &webview_clone);
                     }
@@ -420,8 +491,6 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow, webview: &WebView, file_
                 }
                 _ => {}
             }
-        } else {
-            info!("No unicode character for this key");
         }
 
         glib::Propagation::Proceed
