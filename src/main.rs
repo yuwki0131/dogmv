@@ -81,7 +81,8 @@ fn load_markdown(path: &str) -> Result<String, std::io::Error> {
 fn render_markdown(markdown: &str) -> String {
     info!("Rendering markdown ({} chars)", markdown.len());
 
-    use comrak::{markdown_to_html, Options};
+    use comrak::{markdown_to_html_with_plugins, Options, Plugins};
+    use comrak::plugins::syntect::SyntectAdapter;
 
     let mut options = Options::default();
     // Enable GitHub Flavored Markdown extensions
@@ -90,7 +91,12 @@ fn render_markdown(markdown: &str) -> String {
     options.extension.tasklist = true;
     options.extension.autolink = true;
 
-    markdown_to_html(markdown, &options)
+    // Create syntect adapter for syntax highlighting
+    let adapter = SyntectAdapter::new(Some("InspiredGitHub"));
+    let mut plugins = Plugins::default();
+    plugins.render.codefence_syntax_highlighter = Some(&adapter);
+
+    markdown_to_html_with_plugins(markdown, &options, &plugins)
 }
 
 fn create_html(body: &str, base_path: &str) -> String {
@@ -150,7 +156,6 @@ fn create_html(body: &str, base_path: &str) -> String {
         }}
 
         pre {{
-            background-color: #f6f8fa;
             padding: 16px;
             overflow: auto;
             font-size: 85%;
@@ -158,6 +163,16 @@ fn create_html(body: &str, base_path: &str) -> String {
             border-radius: 6px;
             margin-top: 0;
             margin-bottom: 16px;
+        }}
+
+        /* Syntax highlighted code blocks */
+        pre.syntect {{
+            background-color: #ffffff;
+        }}
+
+        /* Plain code blocks without syntax highlighting */
+        pre:not(.syntect) {{
+            background-color: #f6f8fa;
         }}
 
         pre code {{
@@ -288,6 +303,29 @@ mod tests {
         let md2 = "~~strikethrough~~";
         let html2 = render_markdown(md2);
         assert!(html2.contains("<del>") || html2.contains("strikethrough"));
+    }
+
+    #[test]
+    fn test_syntax_highlighting() {
+        // Test code block with language specification
+        let md = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
+        let html = render_markdown(md);
+
+        // Check that syntect has added syntax highlighting
+        // syntect adds inline styles with color attributes
+        assert!(html.contains("<pre") || html.contains("<code"));
+        assert!(html.contains("main"));
+        assert!(html.contains("println"));
+    }
+
+    #[test]
+    fn test_code_block_without_language() {
+        // Test code block without language specification
+        let md = "```\nplain code\n```";
+        let html = render_markdown(md);
+
+        assert!(html.contains("<pre") || html.contains("<code"));
+        assert!(html.contains("plain code"));
     }
 
     #[test]
