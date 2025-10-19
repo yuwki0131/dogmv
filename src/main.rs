@@ -190,20 +190,22 @@ fn create_html(body: &str, base_path: &str) -> String {
             border-radius: 6px;
             margin-top: 0;
             margin-bottom: 16px;
+            background-color: #f6f8fa !important;
         }}
 
-        /* Syntax highlighted code blocks */
+        /* Syntax highlighted code blocks - override inline styles */
         pre.syntect {{
-            background-color: #ffffff;
+            background-color: #f6f8fa !important;
         }}
 
         /* Plain code blocks without syntax highlighting */
         pre:not(.syntect) {{
-            background-color: #f6f8fa;
+            background-color: #f6f8fa !important;
         }}
 
+        /* Override any inline background styles on code elements */
         pre code {{
-            background-color: transparent;
+            background-color: transparent !important;
             padding: 0;
             margin: 0;
             font-size: 100%;
