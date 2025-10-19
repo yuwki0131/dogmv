@@ -25,6 +25,7 @@
           pango
           gdk-pixbuf
           atk
+          gsettings-desktop-schemas
         ];
 
         nativeBuildInputs = with pkgs; [
@@ -75,6 +76,7 @@
           shellHook = ''
             export RUST_LOG=dogmv=debug
             export GDK_BACKEND=wayland
+            export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}:$XDG_DATA_DIRS"
             echo "dogmv development environment loaded"
             echo "Run 'cargo run <file.md>' to start the application"
           '';
