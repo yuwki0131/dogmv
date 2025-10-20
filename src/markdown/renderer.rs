@@ -2,8 +2,8 @@ use comrak::{markdown_to_html_with_plugins, Options, Plugins};
 use comrak::plugins::syntect::SyntectAdapter;
 use log::info;
 use std::fs;
-use std::io;
 use std::path::Path;
+use crate::error::{DogmvError, Result};
 
 /// Loads a Markdown file from the given path.
 ///
@@ -12,10 +12,25 @@ use std::path::Path;
 ///
 /// # Returns
 /// * `Ok(String)` - File contents
-/// * `Err(io::Error)` - If file cannot be read
-pub fn load_markdown(path: &Path) -> Result<String, io::Error> {
+/// * `Err(DogmvError)` - If file cannot be read
+pub fn load_markdown(path: &Path) -> Result<String> {
     info!("Loading markdown file: {}", path.display());
-    let content = fs::read_to_string(path)?;
+
+    // Check if file exists
+    if !path.exists() {
+        return Err(DogmvError::FileNotFound(path.to_path_buf()));
+    }
+
+    // Read file and handle UTF-8 errors
+    let content = fs::read_to_string(path)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                DogmvError::InvalidUtf8(path.to_path_buf())
+            } else {
+                DogmvError::Io(e)
+            }
+        })?;
+
     info!("Loaded {} bytes", content.len());
     Ok(content)
 }

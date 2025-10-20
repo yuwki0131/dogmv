@@ -1,3 +1,4 @@
+mod error;
 mod file_system;
 mod markdown;
 mod models;
@@ -545,7 +546,7 @@ fn setup_file_watcher(webview: &WebView, file_path: &Path) {
     // Spawn a thread to handle file watching
     std::thread::spawn(move || {
         // Create a channel for file system events
-        let (event_tx, event_rx) = mpsc::channel::<Result<Event, notify::Error>>();
+        let (event_tx, event_rx) = mpsc::channel::<std::result::Result<Event, notify::Error>>();
 
         // Create a watcher
         let mut watcher = match RecommendedWatcher::new(
