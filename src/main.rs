@@ -99,6 +99,9 @@ fn main() {
 fn build_ui(app: &Application) {
     info!("Building UI");
 
+    // Setup CSS for toggle button (remove border on hover)
+    setup_toggle_button_css();
+
     // Parse CLI arguments
     let args: Vec<String> = env::args().collect();
     let (initial_file, root_dir) = parse_arguments(&args);
@@ -124,6 +127,8 @@ fn build_ui(app: &Application) {
     // Create sidebar toggle button (initially showing close icon since sidebar is visible)
     let toggle_button = Button::from_icon_name("pan-start-symbolic");
     toggle_button.set_tooltip_text(Some("サイドバー閉じる"));
+    toggle_button.add_css_class("flat"); // Remove button border
+    toggle_button.add_css_class("flat-toggle"); // Remove border on hover/active
 
     // Create tree view (initially visible)
     let (tree_scroll, selection_model) = create_tree_view(&root_dir);
@@ -401,6 +406,37 @@ fn setup_file_selection_handler(
             }
         }
     });
+}
+
+/// Setup CSS for toggle button to remove borders completely
+fn setup_toggle_button_css() {
+    let css_provider = gtk4::CssProvider::new();
+    css_provider.load_from_data(
+        r#"
+        .flat-toggle {
+            border: none;
+            background: none;
+            box-shadow: none;
+            padding: 4px;
+        }
+        .flat-toggle:hover {
+            border: none;
+            background: rgba(255, 255, 255, 0.1);
+            box-shadow: none;
+        }
+        .flat-toggle:active {
+            border: none;
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: none;
+        }
+        "#
+    );
+
+    gtk4::style_context_add_provider_for_display(
+        &gdk::Display::default().expect("Could not connect to a display"),
+        &css_provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 }
 
 /// Setup toggle button for sidebar visibility
