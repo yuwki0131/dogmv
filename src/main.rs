@@ -124,8 +124,11 @@ fn build_ui(app: &Application) {
     let toggle_button = Button::from_icon_name("pan-end-symbolic");
     toggle_button.set_tooltip_text(Some("サイドバー展開"));
 
+    // Setup CSS for highlighting current file
+    setup_tree_view_css();
+
     // Create tree view (initially visible)
-    let (tree_scroll, selection_model) = create_tree_view(&root_dir);
+    let (tree_scroll, selection_model, tree_current_file) = create_tree_view(&root_dir, initial_file.clone());
 
     // Create sidebar box
     let sidebar_box = GtkBox::new(Orientation::Vertical, 0);
@@ -151,7 +154,7 @@ fn build_ui(app: &Application) {
     setup_toggle_button(&app_state);
 
     // Setup file selection handler
-    setup_file_selection_handler(&selection_model, &app_state);
+    setup_file_selection_handler(&selection_model, &app_state, &tree_current_file);
 
     // Display initial content
     if let Some(ref file_path) = initial_file {
@@ -205,9 +208,32 @@ fn parse_arguments(args: &[String]) -> (Option<PathBuf>, PathBuf) {
     }
 }
 
+/// Setup CSS for tree view highlighting
+fn setup_tree_view_css() {
+    let provider = gtk4::CssProvider::new();
+    provider.load_from_data(
+        r#"
+        .current-file {
+            background-color: alpha(@theme_selected_bg_color, 0.3);
+            border-radius: 4px;
+        }
+        .current-file-label {
+            font-weight: bold;
+            color: @theme_selected_bg_color;
+        }
+        "#,
+    );
+
+    gtk4::style_context_add_provider_for_display(
+        &gdk::Display::default().expect("Could not connect to display"),
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+}
+
 /// Create tree view for file browser
-/// Returns: (ScrolledWindow, SingleSelection)
-fn create_tree_view(root_dir: &Path) -> (ScrolledWindow, SingleSelection) {
+/// Returns: (ScrolledWindow, SingleSelection, Arc<Mutex<Option<PathBuf>>>)
+fn create_tree_view(root_dir: &Path, initial_file: Option<PathBuf>) -> (ScrolledWindow, SingleSelection, Arc<Mutex<Option<PathBuf>>>) {
     let scroll = ScrolledWindow::new();
     scroll.set_vexpand(true);
     scroll.set_hexpand(true);
@@ -272,7 +298,12 @@ fn create_tree_view(root_dir: &Path) -> (ScrolledWindow, SingleSelection) {
         list_item.set_child(Some(&row));
     });
 
+    // Clone current_file for the bind closure
+    let current_file_for_bind = Arc::new(Mutex::new(initial_file));
+    let current_file_for_bind_clone = current_file_for_bind.clone();
+
     factory.connect_bind(move |_, list_item| {
+        let current_file_for_bind = current_file_for_bind_clone.clone();
         let tree_list_row = list_item
             .item()
             .and_downcast::<TreeListRow>()
@@ -314,12 +345,29 @@ fn create_tree_view(root_dir: &Path) -> (ScrolledWindow, SingleSelection) {
         if file_item.is_symlink() {
             name_label.set_text(&format!("{} (symlink)", name));
         }
+
+        // Highlight current file
+        let current_path = file_item.path_buf();
+        let is_current = if let Ok(current) = current_file_for_bind.lock() {
+            current.as_ref().map(|p| p == &current_path).unwrap_or(false)
+        } else {
+            false
+        };
+
+        if is_current {
+            // Highlight the current file
+            row_widget.add_css_class("current-file");
+            name_label.add_css_class("current-file-label");
+        } else {
+            row_widget.remove_css_class("current-file");
+            name_label.remove_css_class("current-file-label");
+        }
     });
 
     list_view.set_factory(Some(&factory));
 
     scroll.set_child(Some(&list_view));
-    (scroll, selection_model)
+    (scroll, selection_model, current_file_for_bind)
 }
 
 /// Load directory items and sort them (directories first, then alphabetically)
@@ -362,9 +410,15 @@ fn load_directory_items(dir_path: &Path) -> Vec<FileItem> {
 }
 
 /// Setup file selection handler for tree view
-fn setup_file_selection_handler(selection_model: &SingleSelection, state: &AppState) {
+fn setup_file_selection_handler(
+    selection_model: &SingleSelection,
+    state: &AppState,
+    tree_current_file: &Arc<Mutex<Option<PathBuf>>>
+) {
     let webview = state.webview.clone();
     let current_file = state.current_file.clone();
+    let tree_current_file = tree_current_file.clone();
+    let selection_model_clone = selection_model.clone();
 
     selection_model.connect_selected_item_notify(move |model| {
         if let Some(selected_item) = model.selected_item() {
@@ -376,9 +430,19 @@ fn setup_file_selection_handler(selection_model: &SingleSelection, state: &AppSt
                     if !file_item.is_dir() && !file_item.is_symlink() {
                         info!("File selected: {}", path.display());
 
-                        // Update current file
+                        // Update current file in app state
                         if let Ok(mut current) = current_file.lock() {
                             *current = Some(path.clone());
+                        }
+
+                        // Update tree view current file
+                        if let Ok(mut tree_current) = tree_current_file.lock() {
+                            *tree_current = Some(path.clone());
+                        }
+
+                        // Force tree view to redraw with updated highlighting
+                        if let Some(model) = selection_model_clone.model() {
+                            model.items_changed(0, model.n_items(), model.n_items());
                         }
 
                         // Display markdown
