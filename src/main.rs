@@ -1,9 +1,9 @@
 use gtk4::prelude::*;
-use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType, MessageDialog, MessageType, ButtonsType};
+use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType, HeaderBar, Paned, Orientation, ScrolledWindow, Box as GtkBox, Button, Label};
 use log::{error, info, warn};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 use webkit6::prelude::*;
@@ -11,95 +11,178 @@ use webkit6::WebView;
 
 const APP_ID: &str = "com.github.dogmv";
 
+// アプリケーション状態を保持する構造体
+#[derive(Clone)]
+struct AppState {
+    current_file: Arc<Mutex<Option<PathBuf>>>,
+    root_dir: Arc<Mutex<Option<PathBuf>>>,
+    webview: WebView,
+    tree_scroll: ScrolledWindow,
+    toggle_button: Button,
+}
+
 fn main() {
     // Initialize logger
     env_logger::init();
     info!("Starting dogmv - Markdown Viewer v{}", env!("CARGO_PKG_VERSION"));
 
-    // Parse CLI arguments
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Error: No file specified");
-        eprintln!();
-        eprintln!("Usage: {} <file.md>", args.get(0).map(|s| s.as_str()).unwrap_or("dogmv"));
-        eprintln!();
-        eprintln!("Examples:");
-        eprintln!("  {} README.md", args.get(0).map(|s| s.as_str()).unwrap_or("dogmv"));
-        eprintln!("  {} /path/to/document.md", args.get(0).map(|s| s.as_str()).unwrap_or("dogmv"));
-        std::process::exit(1);
-    }
-
-    let file_path = &args[1];
-    info!("File path: {}", file_path);
-
-    // Check file exists
-    if !Path::new(file_path).exists() {
-        eprintln!("Error: File not found: {}", file_path);
-        eprintln!();
-        eprintln!("Please check that:");
-        eprintln!("  - The file path is correct");
-        eprintln!("  - The file exists");
-        eprintln!("  - You have permission to read the file");
-        std::process::exit(1);
-    }
-
-    // Check if file is readable
-    if let Err(e) = std::fs::metadata(file_path) {
-        eprintln!("Error: Cannot access file: {}", file_path);
-        eprintln!("Reason: {}", e);
-        std::process::exit(1);
-    }
-
     // Create GTK Application
-    // Use FLAGS_NONE to handle command-line arguments ourselves
     let app = Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::FLAGS_NONE)
         .build();
 
-    let file_path_clone = file_path.clone();
     app.connect_activate(move |app| {
-        build_ui(app, &file_path_clone);
+        build_ui(app);
     });
 
-    // Run the application without passing command-line arguments to GTK
-    // Pass empty args to prevent GTK from trying to handle our file argument
     app.run_with_args(&Vec::<String>::new());
 }
 
-fn build_ui(app: &Application, file_path: &str) {
+fn build_ui(app: &Application) {
     info!("Building UI");
+
+    // Parse CLI arguments
+    let args: Vec<String> = env::args().collect();
+    let (initial_file, root_dir) = parse_arguments(&args);
+
+    // Create HeaderBar (CSD)
+    let header_bar = HeaderBar::new();
+    header_bar.set_show_title_buttons(true);
+    header_bar.set_title_widget(Some(&Label::new(Some("dogmv - Markdown Viewer"))));
 
     // Create main window
     let window = ApplicationWindow::builder()
         .application(app)
-        .title("dogmv - Markdown Viewer")
         .default_width(1024)
         .default_height(768)
         .build();
 
-    // Create WebView
+    window.set_titlebar(Some(&header_bar));
+
+    // Create WebView for preview
     info!("Creating WebView");
     let webview = WebView::new();
 
-    // Load and display markdown
-    display_markdown(&webview, file_path);
+    // Create sidebar toggle button
+    let toggle_button = Button::from_icon_name("pan-end-symbolic");
+    toggle_button.set_tooltip_text(Some("サイドバー展開"));
 
-    // Setup file watcher
-    setup_file_watcher(&webview, file_path);
+    // Create tree view (initially visible)
+    let tree_scroll = create_tree_view(&root_dir);
+
+    // Create sidebar box
+    let sidebar_box = GtkBox::new(Orientation::Vertical, 0);
+    sidebar_box.append(&toggle_button);
+    sidebar_box.append(&tree_scroll);
+
+    // Create Paned layout
+    let paned = Paned::new(Orientation::Horizontal);
+    paned.set_start_child(Some(&sidebar_box));
+    paned.set_end_child(Some(&webview));
+    paned.set_position(250); // Initial width: 250px
+
+    // Setup app state
+    let app_state = AppState {
+        current_file: Arc::new(Mutex::new(initial_file.clone())),
+        root_dir: Arc::new(Mutex::new(Some(root_dir.clone()))),
+        webview: webview.clone(),
+        tree_scroll: tree_scroll.clone(),
+        toggle_button: toggle_button.clone(),
+    };
+
+    // Setup toggle button click handler
+    setup_toggle_button(&app_state);
+
+    // Display initial content
+    if let Some(ref file_path) = initial_file {
+        display_markdown(&webview, file_path);
+        setup_file_watcher(&webview, file_path);
+    } else {
+        display_welcome_message(&webview);
+    }
 
     // Setup keyboard shortcuts
-    setup_keyboard_shortcuts(&window, &webview, file_path);
+    setup_keyboard_shortcuts(&window, &app_state);
 
-    // Add WebView to window
-    window.set_child(Some(&webview));
+    // Add layout to window
+    window.set_child(Some(&paned));
 
     info!("Presenting window");
     window.present();
 }
 
-fn load_markdown(path: &str) -> Result<String, std::io::Error> {
-    info!("Loading markdown file: {}", path);
+/// Parse command-line arguments and determine initial file and root directory
+/// Returns: (initial_file: Option<PathBuf>, root_dir: PathBuf)
+fn parse_arguments(args: &[String]) -> (Option<PathBuf>, PathBuf) {
+    if args.len() < 2 {
+        // No arguments: use current directory
+        let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        info!("No arguments provided, using current directory: {:?}", current_dir);
+        return (None, current_dir);
+    }
+
+    let arg_path = Path::new(&args[1]);
+
+    if !arg_path.exists() {
+        eprintln!("Error: Path not found: {}", args[1]);
+        std::process::exit(1);
+    }
+
+    if arg_path.is_file() {
+        // File specified: open file and use parent directory as root
+        let parent_dir = arg_path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        info!("File specified: {:?}, root directory: {:?}", arg_path, parent_dir);
+        (Some(arg_path.to_path_buf()), parent_dir)
+    } else if arg_path.is_dir() {
+        // Directory specified: use as root directory, no initial file
+        info!("Directory specified: {:?}", arg_path);
+        (None, arg_path.to_path_buf())
+    } else {
+        eprintln!("Error: Invalid path: {}", args[1]);
+        std::process::exit(1);
+    }
+}
+
+/// Create tree view for file browser
+fn create_tree_view(root_dir: &Path) -> ScrolledWindow {
+    let scroll = ScrolledWindow::new();
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+
+    // TODO: Implement actual tree view with ListView + TreeListModel
+    // For now, create a placeholder
+    let placeholder = Label::new(Some(&format!("Tree view for:\n{}", root_dir.display())));
+    scroll.set_child(Some(&placeholder));
+
+    scroll
+}
+
+/// Setup toggle button for sidebar visibility
+fn setup_toggle_button(state: &AppState) {
+    let tree_scroll = state.tree_scroll.clone();
+    let toggle_button = state.toggle_button.clone();
+
+    toggle_button.connect_clicked(move |btn| {
+        let is_visible = tree_scroll.is_visible();
+        tree_scroll.set_visible(!is_visible);
+
+        if is_visible {
+            // Closing sidebar
+            btn.set_icon_name("pan-end-symbolic");
+            btn.set_tooltip_text(Some("サイドバー展開"));
+        } else {
+            // Opening sidebar
+            btn.set_icon_name("pan-start-symbolic");
+            btn.set_tooltip_text(Some("サイドバー閉じる"));
+        }
+    });
+}
+
+fn load_markdown(path: &Path) -> Result<String, std::io::Error> {
+    info!("Loading markdown file: {}", path.display());
     let content = std::fs::read_to_string(path)?;
     info!("Loaded {} bytes", content.len());
     Ok(content)
@@ -193,17 +276,14 @@ fn create_html(body: &str, base_path: &str) -> String {
             background-color: #f6f8fa !important;
         }}
 
-        /* Syntax highlighted code blocks - override inline styles */
         pre.syntect {{
             background-color: #f6f8fa !important;
         }}
 
-        /* Plain code blocks without syntax highlighting */
         pre:not(.syntect) {{
             background-color: #f6f8fa !important;
         }}
 
-        /* Override any inline background styles on code elements */
         pre code {{
             background-color: transparent !important;
             padding: 0;
@@ -266,7 +346,6 @@ fn create_html(body: &str, base_path: &str) -> String {
             border: 0;
         }}
 
-        /* Task list */
         input[type="checkbox"] {{
             margin-right: 0.5em;
         }}
@@ -280,13 +359,13 @@ fn create_html(body: &str, base_path: &str) -> String {
     )
 }
 
-fn display_markdown(webview: &WebView, file_path: &str) {
+fn display_markdown(webview: &WebView, file_path: &Path) {
     match load_markdown(file_path) {
         Ok(markdown) => {
             let html_body = render_markdown(&markdown);
 
             // Get base directory for relative paths
-            let base_dir = Path::new(file_path)
+            let base_dir = file_path
                 .parent()
                 .and_then(|p| p.to_str())
                 .unwrap_or("");
@@ -296,14 +375,81 @@ fn display_markdown(webview: &WebView, file_path: &str) {
             info!("Markdown displayed successfully");
         }
         Err(e) => {
-            error!("Failed to load markdown file '{}': {}", file_path, e);
+            error!("Failed to load markdown file '{}': {}", file_path.display(), e);
             let error_html = create_error_html(
                 "Failed to Load File",
-                &format!("Could not read file: {}\n\nError: {}", file_path, e)
+                &format!("Could not read file: {}\n\nError: {}", file_path.display(), e)
             );
             webview.load_html(&error_html, None);
         }
     }
+}
+
+fn display_welcome_message(webview: &WebView) {
+    info!("Displaying welcome message");
+    let html = r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            text-align: center;
+            margin-top: 50px;
+            color: #24292e;
+        }
+        h1 {
+            font-size: 2.5em;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 1.2em;
+            margin-bottom: 50px;
+        }
+        .shortcuts {
+            margin-top: 50px;
+            text-align: left;
+            display: inline-block;
+        }
+        .shortcuts h3 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+        }
+        .shortcuts ul {
+            list-style: none;
+            padding-left: 0;
+            font-size: 1.1em;
+        }
+        .shortcuts li {
+            margin-bottom: 10px;
+        }
+        kbd {
+            background-color: #f6f8fa;
+            border: 1px solid #d1d5da;
+            border-radius: 3px;
+            padding: 3px 8px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <h1>dogmv - Markdown Viewer</h1>
+    <p class="subtitle">← 左側のツリーからMarkdownファイルを選択してください</p>
+
+    <div class="shortcuts">
+        <h3>キーボードショートカット:</h3>
+        <ul>
+            <li><kbd>Ctrl+O</kbd> : ファイルを開く</li>
+            <li><kbd>Ctrl+R</kbd> : リロード</li>
+            <li><kbd>Ctrl+Q</kbd> : 終了</li>
+        </ul>
+    </div>
+</body>
+</html>"#;
+    webview.load_html(html, None);
 }
 
 fn create_error_html(title: &str, message: &str) -> String {
@@ -350,31 +496,10 @@ fn create_error_html(title: &str, message: &str) -> String {
     )
 }
 
-#[allow(dead_code)]
-fn show_error_dialog(window: Option<&ApplicationWindow>, title: &str, message: &str) {
-    let dialog = MessageDialog::builder()
-        .message_type(MessageType::Error)
-        .buttons(ButtonsType::Ok)
-        .text(title)
-        .secondary_text(message)
-        .modal(true)
-        .build();
+fn setup_file_watcher(webview: &WebView, file_path: &Path) {
+    info!("Setting up file watcher for: {}", file_path.display());
 
-    if let Some(win) = window {
-        dialog.set_transient_for(Some(win));
-    }
-
-    dialog.connect_response(|dialog, _| {
-        dialog.close();
-    });
-
-    dialog.show();
-}
-
-fn setup_file_watcher(webview: &WebView, file_path: &str) {
-    info!("Setting up file watcher for: {}", file_path);
-
-    let file_path = file_path.to_string();
+    let file_path = file_path.to_path_buf();
     let file_path_for_thread = file_path.clone();
 
     // Use Arc<Mutex<bool>> to signal file changes
@@ -403,7 +528,7 @@ fn setup_file_watcher(webview: &WebView, file_path: &str) {
         };
 
         // Watch the file
-        if let Err(e) = watcher.watch(Path::new(&file_path_for_thread), RecursiveMode::NonRecursive) {
+        if let Err(e) = watcher.watch(&file_path_for_thread, RecursiveMode::NonRecursive) {
             error!("Failed to watch file: {}", e);
             return;
         }
@@ -441,7 +566,7 @@ fn setup_file_watcher(webview: &WebView, file_path: &str) {
         // Check if file has changed
         if let Ok(mut changed) = file_changed.lock() {
             if *changed {
-                info!("Reloading file: {}", file_path);
+                info!("Reloading file: {}", file_path.display());
                 display_markdown(&webview_clone, &file_path);
                 *changed = false;
             }
@@ -450,15 +575,14 @@ fn setup_file_watcher(webview: &WebView, file_path: &str) {
     });
 }
 
-fn setup_keyboard_shortcuts(window: &ApplicationWindow, webview: &WebView, file_path: &str) {
+fn setup_keyboard_shortcuts(window: &ApplicationWindow, state: &AppState) {
     info!("Setting up keyboard shortcuts");
 
     let controller = EventControllerKey::new();
 
     let app_weak = window.application().and_then(|app| Some(app.downgrade()));
     let window_weak = window.downgrade();
-    let webview_clone = webview.clone();
-    let file_path = file_path.to_string();
+    let state_clone = state.clone();
 
     controller.connect_key_pressed(move |_, key, _keycode, modifier| {
         // Check for Ctrl key
@@ -471,8 +595,12 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow, webview: &WebView, file_
             match ch {
                 'r' | 'R' => {
                     // Ctrl+R: Reload
-                    info!("Reloading file: {}", &file_path);
-                    display_markdown(&webview_clone, &file_path);
+                    if let Ok(current_file) = state_clone.current_file.lock() {
+                        if let Some(ref file_path) = *current_file {
+                            info!("Reloading file: {}", file_path.display());
+                            display_markdown(&state_clone.webview, file_path);
+                        }
+                    }
                     return glib::Propagation::Stop;
                 }
                 'q' | 'Q' => {
@@ -487,7 +615,7 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow, webview: &WebView, file_
                     // Ctrl+O: Open file
                     info!("Opening file dialog");
                     if let Some(window) = window_weak.upgrade() {
-                        open_file_dialog(&window, &webview_clone);
+                        open_file_dialog(&window, &state_clone);
                     }
                     return glib::Propagation::Stop;
                 }
@@ -498,13 +626,12 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow, webview: &WebView, file_
         glib::Propagation::Proceed
     });
 
-    // IMPORTANT: Attach controller to WebView, not Window
-    // WebView captures all keyboard input, so we need to listen there
-    webview.add_controller(controller);
+    // Attach controller to WebView
+    state.webview.add_controller(controller);
     info!("Keyboard controller attached to WebView");
 }
 
-fn open_file_dialog(window: &ApplicationWindow, webview: &WebView) {
+fn open_file_dialog(window: &ApplicationWindow, state: &AppState) {
     info!("Opening file dialog");
 
     let dialog = FileChooserDialog::new(
@@ -521,16 +648,28 @@ fn open_file_dialog(window: &ApplicationWindow, webview: &WebView) {
     filter.set_name(Some("Markdown files"));
     dialog.add_filter(&filter);
 
-    let webview_clone = webview.clone();
+    let state_clone = state.clone();
 
     dialog.connect_response(move |dialog, response| {
         if response == ResponseType::Accept {
             if let Some(file) = dialog.file() {
                 if let Some(path) = file.path() {
-                    if let Some(path_str) = path.to_str() {
-                        info!("Selected file: {}", path_str);
-                        display_markdown(&webview_clone, path_str);
+                    info!("Selected file: {}", path.display());
+
+                    // Update current file
+                    if let Ok(mut current_file) = state_clone.current_file.lock() {
+                        *current_file = Some(path.clone());
                     }
+
+                    // Update root directory to parent of selected file
+                    if let Some(parent) = path.parent() {
+                        if let Ok(mut root_dir) = state_clone.root_dir.lock() {
+                            *root_dir = Some(parent.to_path_buf());
+                        }
+                        // TODO: Update tree view to show new root directory
+                    }
+
+                    display_markdown(&state_clone.webview, &path);
                 }
             }
         }
@@ -575,7 +714,6 @@ mod tests {
         let html = render_markdown(md);
 
         // Check that syntect has added syntax highlighting
-        // syntect adds inline styles with color attributes
         assert!(html.contains("<pre") || html.contains("<code"));
         assert!(html.contains("main"));
         assert!(html.contains("println"));
@@ -613,5 +751,13 @@ mod tests {
         assert!(html.contains("font-family"));
         assert!(html.contains("line-height"));
         assert!(html.contains("border-bottom"));
+    }
+
+    #[test]
+    fn test_parse_arguments_no_args() {
+        let args = vec!["dogmv".to_string()];
+        let (file, root) = parse_arguments(&args);
+        assert!(file.is_none());
+        assert!(root.is_absolute() || root.as_os_str() == ".");
     }
 }
