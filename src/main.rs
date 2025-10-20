@@ -1,7 +1,13 @@
+mod file_system;
+mod markdown;
+mod models;
+
+use file_system::parse_arguments;
 use gtk4::prelude::*;
-use gtk4::subclass::prelude::*;
 use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType, HeaderBar, Paned, Orientation, ScrolledWindow, Box as GtkBox, Button, Label, ListView, SignalListItemFactory, SingleSelection, TreeListModel, TreeListRow};
 use log::{error, info, warn};
+use markdown::{create_html, load_markdown, render_markdown};
+use models::FileItem;
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -22,60 +28,6 @@ struct AppState {
     tree_scroll: ScrolledWindow,
     toggle_button: Button,
     paned: Paned,
-}
-
-// FileItem GObject implementation
-mod file_item {
-    use super::*;
-    use glib::Properties;
-    use std::cell::RefCell;
-
-    #[derive(Properties, Default)]
-    #[properties(wrapper_type = super::FileItem)]
-    pub struct FileItemPriv {
-        #[property(get, set)]
-        path: RefCell<String>,
-        #[property(get, set)]
-        name: RefCell<String>,
-        #[property(get, set)]
-        is_dir: RefCell<bool>,
-        #[property(get, set)]
-        is_symlink: RefCell<bool>,
-    }
-
-    #[glib::object_subclass]
-    impl ObjectSubclass for FileItemPriv {
-        const NAME: &'static str = "FileItem";
-        type Type = super::FileItem;
-        type ParentType = glib::Object;
-    }
-
-    #[glib::derived_properties]
-    impl ObjectImpl for FileItemPriv {}
-}
-
-glib::wrapper! {
-    pub struct FileItem(ObjectSubclass<file_item::FileItemPriv>);
-}
-
-impl FileItem {
-    pub fn new(path: &Path) -> Option<Self> {
-        let metadata = fs::symlink_metadata(path).ok()?;
-        let name = path.file_name()?.to_string_lossy().to_string();
-        let is_dir = metadata.is_dir();
-        let is_symlink = metadata.is_symlink();
-
-        Some(glib::Object::builder()
-            .property("path", path.to_string_lossy().to_string())
-            .property("name", name)
-            .property("is-dir", is_dir)
-            .property("is-symlink", is_symlink)
-            .build())
-    }
-
-    pub fn path_buf(&self) -> PathBuf {
-        PathBuf::from(self.path())
-    }
 }
 
 fn main() {
@@ -181,40 +133,6 @@ fn build_ui(app: &Application) {
 
     info!("Presenting window");
     window.present();
-}
-
-/// Parse command-line arguments and determine initial file and root directory
-/// Returns: (initial_file: Option<PathBuf>, root_dir: PathBuf)
-fn parse_arguments(args: &[String]) -> (Option<PathBuf>, PathBuf) {
-    if args.len() < 2 {
-        // No arguments: use current directory
-        let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        info!("No arguments provided, using current directory: {:?}", current_dir);
-        return (None, current_dir);
-    }
-
-    let arg_path = Path::new(&args[1]);
-
-    if !arg_path.exists() {
-        eprintln!("Error: Path not found: {}", args[1]);
-        std::process::exit(1);
-    }
-
-    if arg_path.is_file() {
-        // File specified: open file and use parent directory as root
-        let parent_dir = arg_path.parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
-        info!("File specified: {:?}, root directory: {:?}", arg_path, parent_dir);
-        (Some(arg_path.to_path_buf()), parent_dir)
-    } else if arg_path.is_dir() {
-        // Directory specified: use as root directory, no initial file
-        info!("Directory specified: {:?}", arg_path);
-        (None, arg_path.to_path_buf())
-    } else {
-        eprintln!("Error: Invalid path: {}", args[1]);
-        std::process::exit(1);
-    }
 }
 
 /// Create tree view for file browser
@@ -475,184 +393,6 @@ fn setup_toggle_button(state: &AppState) {
             btn.set_tooltip_text(Some("サイドバー閉じる"));
         }
     });
-}
-
-fn load_markdown(path: &Path) -> Result<String, std::io::Error> {
-    info!("Loading markdown file: {}", path.display());
-    let content = std::fs::read_to_string(path)?;
-    info!("Loaded {} bytes", content.len());
-    Ok(content)
-}
-
-fn render_markdown(markdown: &str) -> String {
-    info!("Rendering markdown ({} chars)", markdown.len());
-
-    use comrak::{markdown_to_html_with_plugins, Options, Plugins};
-    use comrak::plugins::syntect::SyntectAdapter;
-
-    let mut options = Options::default();
-    // Enable GitHub Flavored Markdown extensions
-    options.extension.strikethrough = true;
-    options.extension.table = true;
-    options.extension.tasklist = true;
-    options.extension.autolink = true;
-
-    // Create syntect adapter for syntax highlighting
-    let adapter = SyntectAdapter::new(Some("InspiredGitHub"));
-    let mut plugins = Plugins::default();
-    plugins.render.codefence_syntax_highlighter = Some(&adapter);
-
-    markdown_to_html_with_plugins(markdown, &options, &plugins)
-}
-
-fn create_html(body: &str, base_path: &str) -> String {
-    format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <base href="file://{}/">
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            padding: 20px;
-            max-width: 900px;
-            margin: 0 auto;
-            color: #24292e;
-        }}
-        h1, h2, h3, h4, h5, h6 {{
-            margin-top: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-            line-height: 1.25;
-        }}
-        h1 {{
-            font-size: 2em;
-            border-bottom: 1px solid #eaecef;
-            padding-bottom: 0.3em;
-        }}
-        h2 {{
-            font-size: 1.5em;
-            border-bottom: 1px solid #eaecef;
-            padding-bottom: 0.3em;
-        }}
-        h3 {{ font-size: 1.25em; }}
-        h4 {{ font-size: 1em; }}
-        h5 {{ font-size: 0.875em; }}
-        h6 {{ font-size: 0.85em; color: #6a737d; }}
-
-        p {{ margin-top: 0; margin-bottom: 16px; }}
-
-        a {{
-            color: #0366d6;
-            text-decoration: none;
-        }}
-        a:hover {{
-            text-decoration: underline;
-        }}
-
-        code {{
-            background-color: rgba(27,31,35,0.05);
-            padding: 0.2em 0.4em;
-            margin: 0;
-            font-size: 85%;
-            border-radius: 3px;
-            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        }}
-
-        pre {{
-            padding: 16px;
-            overflow: auto;
-            font-size: 85%;
-            line-height: 1.45;
-            border-radius: 6px;
-            margin-top: 0;
-            margin-bottom: 16px;
-            background-color: #f6f8fa !important;
-        }}
-
-        pre.syntect {{
-            background-color: #f6f8fa !important;
-        }}
-
-        pre:not(.syntect) {{
-            background-color: #f6f8fa !important;
-        }}
-
-        pre code {{
-            background-color: transparent !important;
-            padding: 0;
-            margin: 0;
-            font-size: 100%;
-            border-radius: 0;
-        }}
-
-        blockquote {{
-            padding: 0 1em;
-            color: #6a737d;
-            border-left: 0.25em solid #dfe2e5;
-            margin: 0 0 16px 0;
-        }}
-
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin-bottom: 16px;
-        }}
-
-        table tr {{
-            background-color: #fff;
-            border-top: 1px solid #c6cbd1;
-        }}
-
-        table tr:nth-child(2n) {{
-            background-color: #f6f8fa;
-        }}
-
-        table th, table td {{
-            padding: 6px 13px;
-            border: 1px solid #dfe2e5;
-        }}
-
-        table th {{
-            font-weight: 600;
-        }}
-
-        ul, ol {{
-            margin-top: 0;
-            margin-bottom: 16px;
-            padding-left: 2em;
-        }}
-
-        li + li {{
-            margin-top: 0.25em;
-        }}
-
-        img {{
-            max-width: 100%;
-            box-sizing: content-box;
-        }}
-
-        hr {{
-            height: 0.25em;
-            padding: 0;
-            margin: 24px 0;
-            background-color: #e1e4e8;
-            border: 0;
-        }}
-
-        input[type="checkbox"] {{
-            margin-right: 0.5em;
-        }}
-    </style>
-</head>
-<body>
-{}
-</body>
-</html>"#,
-        base_path, body
-    )
 }
 
 fn display_markdown(webview: &WebView, file_path: &Path) {
@@ -975,85 +715,6 @@ fn open_file_dialog(window: &ApplicationWindow, state: &AppState) {
     dialog.show();
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_render_markdown() {
-        let md = "# Hello\n\nThis is a **test**.";
-        let html = render_markdown(md);
-        assert!(html.contains("<h1>"));
-        assert!(html.contains("Hello"));
-        assert!(html.contains("<strong>"));
-        assert!(html.contains("test"));
-    }
-
-    #[test]
-    fn test_render_markdown_gfm() {
-        // Test table
-        let md = "| A | B |\n|---|---|\n| 1 | 2 |";
-        let html = render_markdown(md);
-        assert!(html.contains("<table>"));
-        assert!(html.contains("<td>"));
-
-        // Test strikethrough
-        let md2 = "~~strikethrough~~";
-        let html2 = render_markdown(md2);
-        assert!(html2.contains("<del>") || html2.contains("strikethrough"));
-    }
-
-    #[test]
-    fn test_syntax_highlighting() {
-        // Test code block with language specification
-        let md = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
-        let html = render_markdown(md);
-
-        // Check that syntect has added syntax highlighting
-        assert!(html.contains("<pre") || html.contains("<code"));
-        assert!(html.contains("main"));
-        assert!(html.contains("println"));
-    }
-
-    #[test]
-    fn test_code_block_without_language() {
-        // Test code block without language specification
-        let md = "```\nplain code\n```";
-        let html = render_markdown(md);
-
-        assert!(html.contains("<pre") || html.contains("<code"));
-        assert!(html.contains("plain code"));
-    }
-
-    #[test]
-    fn test_create_html() {
-        let body = "<p>Test</p>";
-        let base = "/tmp";
-        let html = create_html(body, base);
-
-        assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("<base href="));
-        assert!(html.contains(base));
-        assert!(html.contains(body));
-        assert!(html.contains("</html>"));
-    }
-
-    #[test]
-    fn test_create_html_includes_css() {
-        let body = "<h1>Title</h1>";
-        let html = create_html(body, "/tmp");
-
-        // Check for GitHub-style CSS
-        assert!(html.contains("font-family"));
-        assert!(html.contains("line-height"));
-        assert!(html.contains("border-bottom"));
-    }
-
-    #[test]
-    fn test_parse_arguments_no_args() {
-        let args = vec!["dogmv".to_string()];
-        let (file, root) = parse_arguments(&args);
-        assert!(file.is_none());
-        assert!(root.is_absolute() || root.as_os_str() == ".");
-    }
-}
+// All tests have been moved to respective modules:
+// - Markdown tests: src/markdown/renderer.rs
+// - CLI tests: src/file_system/cli.rs
