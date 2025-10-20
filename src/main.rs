@@ -21,6 +21,7 @@ struct AppState {
     webview: WebView,
     tree_scroll: ScrolledWindow,
     toggle_button: Button,
+    paned: Paned,
 }
 
 // FileItem GObject implementation
@@ -120,16 +121,21 @@ fn build_ui(app: &Application) {
     info!("Creating WebView");
     let webview = WebView::new();
 
-    // Create sidebar toggle button
-    let toggle_button = Button::from_icon_name("pan-end-symbolic");
-    toggle_button.set_tooltip_text(Some("サイドバー展開"));
+    // Create sidebar toggle button (initially showing close icon since sidebar is visible)
+    let toggle_button = Button::from_icon_name("pan-start-symbolic");
+    toggle_button.set_tooltip_text(Some("サイドバー閉じる"));
 
     // Create tree view (initially visible)
     let (tree_scroll, selection_model) = create_tree_view(&root_dir);
 
+    // Create toggle button box (right-aligned)
+    let toggle_box = GtkBox::new(Orientation::Horizontal, 0);
+    toggle_box.set_halign(gtk4::Align::End);
+    toggle_box.append(&toggle_button);
+
     // Create sidebar box
     let sidebar_box = GtkBox::new(Orientation::Vertical, 0);
-    sidebar_box.append(&toggle_button);
+    sidebar_box.append(&toggle_box);
     sidebar_box.append(&tree_scroll);
 
     // Create Paned layout
@@ -145,6 +151,7 @@ fn build_ui(app: &Application) {
         webview: webview.clone(),
         tree_scroll: tree_scroll.clone(),
         toggle_button: toggle_button.clone(),
+        paned: paned.clone(),
     };
 
     // Setup toggle button click handler
@@ -400,17 +407,34 @@ fn setup_file_selection_handler(
 fn setup_toggle_button(state: &AppState) {
     let tree_scroll = state.tree_scroll.clone();
     let toggle_button = state.toggle_button.clone();
+    let paned = state.paned.clone();
+
+    // Store the original width when sidebar is open
+    let original_width = Arc::new(Mutex::new(250)); // Default initial width
 
     toggle_button.connect_clicked(move |btn| {
         let is_visible = tree_scroll.is_visible();
-        tree_scroll.set_visible(!is_visible);
 
         if is_visible {
-            // Closing sidebar
+            // Closing sidebar - store current width and minimize
+            let current_pos = paned.position();
+            if let Ok(mut width) = original_width.lock() {
+                *width = current_pos;
+            }
+
+            // Set to minimum width (just enough for toggle button, approximately 40-50px)
+            paned.set_position(40);
+            tree_scroll.set_visible(false);
+
             btn.set_icon_name("pan-end-symbolic");
             btn.set_tooltip_text(Some("サイドバー展開"));
         } else {
-            // Opening sidebar
+            // Opening sidebar - restore original width
+            if let Ok(width) = original_width.lock() {
+                paned.set_position(*width);
+            }
+            tree_scroll.set_visible(true);
+
             btn.set_icon_name("pan-start-symbolic");
             btn.set_tooltip_text(Some("サイドバー閉じる"));
         }
