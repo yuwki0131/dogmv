@@ -26,34 +26,50 @@ dogmv is built using:
 ### Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────┐
-│                   dogmv CLI                     │
-│  (Command-line argument parsing, validation)    │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│              GTK4 Application                   │
-│  ┌──────────────────────────────────────────┐  │
-│  │      ApplicationWindow (1024x768)        │  │
-│  │  ┌────────────────────────────────────┐  │  │
-│  │  │        WebView (webkit6)           │  │  │
-│  │  │  - Displays rendered HTML          │  │  │
-│  │  │  - Handles keyboard events         │  │  │
-│  │  └────────────────────────────────────┘  │  │
-│  └──────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
-                 │
-        ┌────────┴────────┐
-        ▼                 ▼
-┌──────────────┐  ┌──────────────┐
-│   Markdown   │  │ File Watcher │
-│  Rendering   │  │   (notify)   │
-│              │  │              │
-│  comrak +    │  │  - inotify   │
-│  syntect     │  │  - 500ms     │
-│              │  │    polling   │
-└──────────────┘  └──────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                        dogmv CLI                                 │
+│  (File/Directory argument parsing, validation)                   │
+└──────────────────────┬───────────────────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    GTK4 Application                              │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │           ApplicationWindow (1024x768)                     │ │
+│  │  ┌──────────────────────────────────────────────────────┐ │ │
+│  │  │             HeaderBar (CSD)                          │ │ │
+│  │  │  - Title: "dogmv - Markdown Viewer"                  │ │ │
+│  │  └──────────────────────────────────────────────────────┘ │ │
+│  │  ┌──────────────────────────────────────────────────────┐ │ │
+│  │  │               Paned (Horizontal Split)               │ │ │
+│  │  │  ┌──────────────┬───────────────────────────────┐   │ │ │
+│  │  │  │  Sidebar     │      WebView (webkit6)        │   │ │ │
+│  │  │  │  (250px)     │      (Preview Pane)           │   │ │ │
+│  │  │  │              │                               │   │ │ │
+│  │  │  │ ┌──────────┐ │  - Rendered HTML              │   │ │ │
+│  │  │  │ │ Toggle ◀ │ │  - Syntax highlighted code    │   │ │ │
+│  │  │  │ └──────────┘ │  - GitHub-style CSS           │   │ │ │
+│  │  │  │              │  - Images, tables, links      │   │ │ │
+│  │  │  │ TreeView:    │                               │   │ │ │
+│  │  │  │ ┌─📁 src    │                               │   │ │ │
+│  │  │  │ ├─📄 main.rs│                               │   │ │ │
+│  │  │  │ └─📄 README │                               │   │ │ │
+│  │  │  │              │                               │   │ │ │
+│  │  │  └──────────────┴───────────────────────────────┘   │ │ │
+│  │  └──────────────────────────────────────────────────────┘ │ │
+│  └────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+┌──────────────┐ ┌─────────────┐ ┌──────────────┐
+│   Markdown   │ │  Directory  │ │ File Watcher │
+│  Rendering   │ │  Tree Model │ │   (notify)   │
+│              │ │             │ │              │
+│  comrak +    │ │ TreeList    │ │  - inotify   │
+│  syntect     │ │ Model +     │ │  - 500ms     │
+│              │ │ ListView    │ │    polling   │
+└──────────────┘ └─────────────┘ └──────────────┘
 ```
 
 ## Project Structure
@@ -61,8 +77,9 @@ dogmv is built using:
 ```
 dogmv/
 ├── src/
-│   └── main.rs              # Main application code (~580 lines)
+│   └── main.rs              # Main application code (~1059 lines)
 ├── Cargo.toml               # Rust dependencies
+├── Cargo.lock               # Locked dependency versions
 ├── flake.nix                # Nix flake for packaging
 ├── shell.nix                # Development environment
 ├── README.md                # Project overview
@@ -70,10 +87,13 @@ dogmv/
 ├── DEVELOPER.md             # This file
 ├── IMPLEMENTATION_PLAN.md   # Development roadmap
 ├── ADR.md                   # Architecture Decision Records
-├── QA.md                    # Technical Q&A
+├── QA.md                    # Technical Q&A (directory tree specs)
+├── CHANGELOG.md             # Version history
 ├── log.md                   # Development log
 ├── CLAUDE.md                # Project instructions for AI
-└── test.md                  # Test markdown file
+├── test.md                  # Test markdown file
+└── img/
+    └── screenshot.png       # Application screenshot
 ```
 
 ## Development Setup
@@ -170,41 +190,78 @@ RUST_LOG=debug cargo test -- --nocapture
 
 ## Code Organization
 
-### Main Components (src/main.rs)
+### Main Components (src/main.rs ~1059 lines)
 
-1. **main()** (lines 14-67)
-   - CLI argument parsing
-   - File validation
-   - GTK application initialization
+**Current Status**: All code in single file - requires refactoring for maintainability
 
-2. **build_ui()** (lines 69-98)
-   - Window creation
-   - WebView setup
-   - Keyboard shortcuts and file watcher initialization
+#### 1. Data Models
+- **AppState** (struct) - Application state container
+  - `current_file`: Currently opened file path
+  - `root_dir`: Root directory for tree view
+  - `webview`: WebView widget reference
+  - `tree_scroll`: Tree view scroll container
+  - `toggle_button`: Sidebar toggle button
+  - `paned`: Paned layout widget
 
-3. **Markdown Rendering**
-   - `load_markdown()` - File I/O
-   - `render_markdown()` - Markdown → HTML conversion
-   - `create_html()` - HTML wrapper with CSS
-   - `display_markdown()` - WebView integration
+- **FileItem** (GObject subclass) - Tree view item model
+  - `path`: File/directory path
+  - `name`: Display name
+  - `is_dir`: Directory flag
+  - `is_symlink`: Symlink flag
 
-4. **File Watching** (lines 371-413)
-   - `setup_file_watcher()` - notify-based file monitoring
-   - Background thread + Arc<Mutex<bool>> pattern
-   - 500ms polling in GTK main loop
+#### 2. UI Construction
+- **main()** - GTK application initialization
+- **build_ui()** - Main UI assembly
+  - CSS setup for toggle button
+  - HeaderBar with CSD
+  - Paned layout creation
+  - Sidebar with tree view
+  - WebView for preview
+  - Keyboard shortcuts setup
 
-5. **Keyboard Shortcuts** (lines 415-473)
-   - `setup_keyboard_shortcuts()` - EventControllerKey setup
-   - Ctrl+Q, Ctrl+R, Ctrl+O handling
-   - WebView-attached controller (important!)
+#### 3. Directory Tree
+- **create_tree_view()** - TreeListModel + ListView setup
+- **load_directory_items()** - Directory scanning and sorting
+- **setup_file_selection_handler()** - File click handling
+- **FileItem GObject implementation** - Properties macro based
 
-6. **File Dialog** (lines 475-508)
-   - `open_file_dialog()` - FileChooserDialog
-   - Markdown file filter (*.md, *.markdown)
+#### 4. Sidebar Toggle
+- **setup_toggle_button_css()** - Flat button CSS
+- **setup_toggle_button()** - Toggle behavior with width preservation
 
-7. **Error Handling**
-   - `create_error_html()` - Styled error pages
-   - `show_error_dialog()` - GTK error dialogs
+#### 5. Markdown Rendering Pipeline
+- **load_markdown()** - File I/O
+- **render_markdown()** - comrak + syntect integration
+- **create_html()** - HTML wrapper with GitHub-style CSS
+- **display_markdown()** - WebView loading
+- **display_welcome_message()** - Initial screen
+
+#### 6. CLI Argument Parsing
+- **parse_arguments()** - File/directory argument handling
+  - Single file: Opens file, uses parent directory as root
+  - Directory: Uses as root, shows welcome screen
+  - No arguments: Uses current directory
+
+#### 7. File Watching
+- **setup_file_watcher()** - notify-based auto-reload
+  - Background thread with inotify
+  - 500ms polling in GTK main loop
+  - Arc<Mutex<bool>> for thread-safe state
+
+#### 8. Keyboard Shortcuts
+- **setup_keyboard_shortcuts()** - EventControllerKey
+  - Ctrl+Q: Quit
+  - Ctrl+R: Reload
+  - Ctrl+O: Open file dialog
+
+#### 9. File Dialog
+- **open_file_dialog()** - FileChooserDialog
+  - Markdown filter (*.md, *.markdown)
+  - Updates tree view and preview
+
+#### 10. Error Handling
+- **create_error_html()** - Styled error pages
+- Display errors in WebView instead of dialogs
 
 ## Key Components
 
