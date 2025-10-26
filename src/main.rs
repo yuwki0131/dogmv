@@ -10,7 +10,7 @@ use ui::{
     setup_toggle_button, setup_toggle_button_css,
 };
 use gtk4::prelude::*;
-use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType, HeaderBar, Paned, Orientation, ScrolledWindow, Box as GtkBox, Button, Label};
+use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType, HeaderBar, Paned, Orientation, Box as GtkBox, Button, Label};
 use log::{error, info, warn};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
@@ -27,9 +27,6 @@ struct AppState {
     current_file: Arc<Mutex<Option<PathBuf>>>,
     root_dir: Arc<Mutex<Option<PathBuf>>>,
     webview: WebView,
-    tree_scroll: ScrolledWindow,
-    toggle_button: Button,
-    paned: Paned,
 }
 
 fn main() {
@@ -108,9 +105,6 @@ fn build_ui(app: &Application) {
         current_file: Arc::new(Mutex::new(initial_file.clone())),
         root_dir: Arc::new(Mutex::new(Some(root_dir.clone()))),
         webview: webview.clone(),
-        tree_scroll: tree_scroll.clone(),
-        toggle_button: toggle_button.clone(),
-        paned: paned.clone(),
     };
 
     // Setup toggle button click handler
