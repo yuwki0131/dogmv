@@ -4,13 +4,14 @@ mod markdown;
 mod models;
 mod ui;
 
+use ctor::ctor;
 use file_system::parse_arguments;
 use ui::{
     create_tree_view, display_markdown, display_welcome_message, setup_file_selection_handler,
     setup_toggle_button, setup_toggle_button_css,
 };
 use gtk4::prelude::*;
-use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserDialog, FileChooserAction, FileFilter, ResponseType, HeaderBar, Paned, Orientation, Box as GtkBox, Button, Label};
+use gtk4::{gdk, gio, glib, Application, ApplicationWindow, EventControllerKey, FileChooserNative, FileChooserAction, FileFilter, ResponseType, HeaderBar, Paned, Orientation, Box as GtkBox, Button, Label};
 use log::{error, info, warn};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
@@ -21,6 +22,16 @@ use webkit6::WebView;
 
 const APP_ID: &str = "com.github.dogmv";
 
+// Initialize environment variables before main() is called
+// This is necessary to prevent GSettings schema errors in GTK4's FileChooser
+#[ctor]
+fn init_environment() {
+    // Disable GSettings to avoid schema errors in FileChooser
+    // This prevents GTK from trying to access FileChooser settings via GSettings
+    // Must be set before GTK initialization, so we use #[ctor] to run before main()
+    std::env::set_var("GSETTINGS_BACKEND", "memory");
+}
+
 // アプリケーション状態を保持する構造体
 #[derive(Clone)]
 struct AppState {
@@ -30,6 +41,7 @@ struct AppState {
 }
 
 fn main() {
+
     // Initialize logger
     env_logger::init();
     info!("Starting dogmv - Markdown Viewer v{}", env!("CARGO_PKG_VERSION"));
@@ -269,19 +281,37 @@ fn setup_keyboard_shortcuts(window: &ApplicationWindow, state: &AppState) {
 fn open_file_dialog(window: &ApplicationWindow, state: &AppState) {
     info!("Opening file dialog");
 
-    let dialog = FileChooserDialog::new(
-        Some("Open Markdown File"),
+    let dialog = FileChooserNative::new(
+        Some("Open File"),
         Some(window),
         FileChooserAction::Open,
-        &[("_Cancel", ResponseType::Cancel), ("_Open", ResponseType::Accept)],
+        Some("_Open"),
+        Some("_Cancel"),
     );
 
-    // Set file filter for markdown files
+    // Set file filter for all files (allow both markdown and source code)
     let filter = FileFilter::new();
     filter.add_pattern("*.md");
     filter.add_pattern("*.markdown");
-    filter.set_name(Some("Markdown files"));
+    filter.add_pattern("*.rs");
+    filter.add_pattern("*.py");
+    filter.add_pattern("*.js");
+    filter.add_pattern("*.ts");
+    filter.add_pattern("*.c");
+    filter.add_pattern("*.cpp");
+    filter.add_pattern("*.h");
+    filter.add_pattern("*.java");
+    filter.add_pattern("*.go");
+    filter.add_pattern("*.sh");
+    filter.add_pattern("*.txt");
+    filter.set_name(Some("All supported files"));
     dialog.add_filter(&filter);
+
+    // Add "All files" filter
+    let all_filter = FileFilter::new();
+    all_filter.add_pattern("*");
+    all_filter.set_name(Some("All files"));
+    dialog.add_filter(&all_filter);
 
     let state_clone = state.clone();
 
@@ -308,7 +338,6 @@ fn open_file_dialog(window: &ApplicationWindow, state: &AppState) {
                 }
             }
         }
-        dialog.close();
     });
 
     dialog.show();
