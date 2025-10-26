@@ -1,11 +1,21 @@
-use crate::markdown::{create_html, load_markdown, render_markdown};
+use crate::markdown::{create_html, load_markdown, render_markdown, is_markdown_file, render_source_code};
 use log::{error, info};
 use std::path::Path;
 use webkit6::prelude::*;
 use webkit6::WebView;
 
-/// Displays a Markdown file in the WebView
+/// Displays a file in the WebView (Markdown or source code)
 pub fn display_markdown(webview: &WebView, file_path: &Path) {
+    // Check if it's a Markdown file
+    if is_markdown_file(file_path) {
+        display_markdown_file(webview, file_path);
+    } else {
+        display_source_file(webview, file_path);
+    }
+}
+
+/// Displays a Markdown file in the WebView
+fn display_markdown_file(webview: &WebView, file_path: &Path) {
     match load_markdown(file_path) {
         Ok(markdown) => {
             let html_body = render_markdown(&markdown);
@@ -22,6 +32,33 @@ pub fn display_markdown(webview: &WebView, file_path: &Path) {
         }
         Err(e) => {
             error!("Failed to load markdown file '{}': {}", file_path.display(), e);
+            let error_html = create_error_html(
+                "Failed to Load File",
+                &format!("Could not read file: {}\n\nError: {}", file_path.display(), e)
+            );
+            webview.load_html(&error_html, None);
+        }
+    }
+}
+
+/// Displays a source code file with syntax highlighting
+fn display_source_file(webview: &WebView, file_path: &Path) {
+    match load_markdown(file_path) {
+        Ok(source_code) => {
+            let highlighted_html = render_source_code(&source_code, file_path);
+
+            // Get base directory for relative paths
+            let base_dir = file_path
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or("");
+
+            let full_html = create_html(&highlighted_html, base_dir);
+            webview.load_html(&full_html, None);
+            info!("Source code displayed successfully");
+        }
+        Err(e) => {
+            error!("Failed to load source file '{}': {}", file_path.display(), e);
             let error_html = create_error_html(
                 "Failed to Load File",
                 &format!("Could not read file: {}\n\nError: {}", file_path.display(), e)

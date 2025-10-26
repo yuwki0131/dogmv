@@ -4,6 +4,9 @@ use log::info;
 use std::fs;
 use std::path::Path;
 use crate::error::{DogmvError, Result};
+use syntect::highlighting::ThemeSet;
+use syntect::html::highlighted_html_for_string;
+use syntect::parsing::SyntaxSet;
 
 /// Loads a Markdown file from the given path.
 ///
@@ -58,6 +61,61 @@ pub fn render_markdown(markdown: &str) -> String {
     plugins.render.codefence_syntax_highlighter = Some(&adapter);
 
     markdown_to_html_with_plugins(markdown, &options, &plugins)
+}
+
+/// Determines if a file is a Markdown file based on extension.
+///
+/// # Arguments
+/// * `path` - Path to the file
+///
+/// # Returns
+/// `true` if the file has .md or .markdown extension
+pub fn is_markdown_file(path: &Path) -> bool {
+    if let Some(ext) = path.extension() {
+        let ext_str = ext.to_string_lossy().to_lowercase();
+        ext_str == "md" || ext_str == "markdown"
+    } else {
+        false
+    }
+}
+
+/// Renders source code to HTML with syntax highlighting.
+///
+/// # Arguments
+/// * `code` - Source code content
+/// * `path` - File path (used to detect syntax by extension)
+///
+/// # Returns
+/// HTML string with syntax highlighted code
+pub fn render_source_code(code: &str, path: &Path) -> String {
+    info!("Rendering source code ({} chars) for {}", code.len(), path.display());
+
+    let syntax_set = SyntaxSet::load_defaults_newlines();
+    let theme_set = ThemeSet::load_defaults();
+    let theme = &theme_set.themes["InspiredGitHub"];
+
+    // Try to find syntax by file extension
+    let syntax = if let Some(ext) = path.extension() {
+        syntax_set
+            .find_syntax_by_extension(&ext.to_string_lossy())
+            .or_else(|| syntax_set.find_syntax_by_first_line(code))
+            .unwrap_or_else(|| syntax_set.find_syntax_plain_text())
+    } else {
+        syntax_set.find_syntax_plain_text()
+    };
+
+    info!("Using syntax: {}", syntax.name);
+
+    // Generate highlighted HTML
+    highlighted_html_for_string(code, &syntax_set, syntax, theme)
+        .unwrap_or_else(|e| {
+            info!("Failed to highlight code: {}, falling back to plain text", e);
+            format!("<pre style='background-color: #f6f8fa; padding: 16px; overflow: auto; border-radius: 6px;'><code>{}</code></pre>",
+                    code.replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;")
+                        .replace('"', "&quot;"))
+        })
 }
 
 /// Creates a complete HTML document with GitHub-style CSS.
@@ -221,6 +279,7 @@ pub fn create_html(body: &str, base_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_render_markdown() {
@@ -260,5 +319,39 @@ mod tests {
         let html = create_html("", "/");
         assert!(html.contains("<style>"));
         assert!(html.contains("font-family"));
+    }
+
+    #[test]
+    fn test_is_markdown_file() {
+        assert!(is_markdown_file(Path::new("test.md")));
+        assert!(is_markdown_file(Path::new("test.markdown")));
+        assert!(is_markdown_file(Path::new("README.MD")));
+        assert!(!is_markdown_file(Path::new("test.rs")));
+        assert!(!is_markdown_file(Path::new("test.txt")));
+        assert!(!is_markdown_file(Path::new("test")));
+    }
+
+    #[test]
+    fn test_render_source_code() {
+        let code = "fn main() {\n    println!(\"Hello, world!\");\n}";
+        let path = PathBuf::from("test.rs");
+        let html = render_source_code(code, &path);
+
+        // Should contain HTML
+        assert!(html.contains("<pre"));
+        // Should contain the code content
+        assert!(html.contains("main"));
+        assert!(html.contains("println"));
+    }
+
+    #[test]
+    fn test_render_source_code_unknown_extension() {
+        let code = "some text content";
+        let path = PathBuf::from("test.unknown");
+        let html = render_source_code(code, &path);
+
+        // Should still return HTML even with unknown extension
+        assert!(html.contains("<pre"));
+        assert!(html.contains("some text content"));
     }
 }
