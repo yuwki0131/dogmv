@@ -2,7 +2,7 @@
 
 NixOS/Hyprland環境で動作するGUIベースのMarkdownビューアアプリケーション
 
-![dogmv Screenshot](img/screenshot.png)
+<img width="1438" height="1746" alt="image" src="https://github.com/user-attachments/assets/e41b8d35-1796-4793-815a-4a650353a52b" />
 
 ## 現在のステータス
 
