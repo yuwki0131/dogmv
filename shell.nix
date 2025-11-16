@@ -36,6 +36,9 @@ pkgs.mkShell {
     # Set up GSettings schema directory for GTK4 FileChooser
     export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk4}/share/gsettings-schemas/${pkgs.gtk4.name}:$XDG_DATA_DIRS"
 
+    # Set up library path for GTK4 and WebKitGTK runtime
+    export LD_LIBRARY_PATH="${pkgs.webkitgtk_6_0}/lib:${pkgs.gtk4}/lib:${pkgs.glib.out}/lib:${pkgs.cairo}/lib:${pkgs.pango}/lib:${pkgs.gdk-pixbuf}/lib:$LD_LIBRARY_PATH"
+
     export RUST_LOG=dogmv=debug
     export GDK_BACKEND=wayland
     echo "dogmv development environment loaded (shell.nix)"
