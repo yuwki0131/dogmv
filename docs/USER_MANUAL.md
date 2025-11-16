@@ -15,6 +15,8 @@
 
 ### Key Features
 
+- **Sidebar file browser** - Navigate files and directories with a tree view
+- **Source code viewer** - View and highlight source code files (.rs, .py, .js, etc.)
 - **GitHub Flavored Markdown** support (tables, task lists, strikethrough, etc.)
 - **Syntax highlighting** for 200+ programming languages
 - **Auto-reload** - automatically refreshes when files are modified
@@ -73,14 +75,19 @@ RUST_LOG=info dogmv README.md
 ### Command-Line Options
 
 ```
-dogmv <file.md>
+dogmv [file|directory]
 
 Arguments:
-  <file.md>    Path to the Markdown file to view
+  [file|directory]    Optional path to a Markdown file or directory
+                      - If a file is provided, opens the file
+                      - If a directory is provided, shows the directory tree
+                      - If omitted, uses the current directory
 
 Examples:
-  dogmv README.md
-  dogmv /path/to/document.md
+  dogmv README.md                    # Open a specific file
+  dogmv /path/to/document.md         # Open file with absolute path
+  dogmv /path/to/project             # Browse directory
+  dogmv                              # Browse current directory
 ```
 
 ## Keyboard Shortcuts
@@ -94,6 +101,25 @@ Examples:
 | **Shift+Space** | Scroll up |
 
 ## Features
+
+### Sidebar File Browser
+
+dogmv includes a sidebar with a file tree view:
+
+- **Directory navigation** - Browse files and folders in the current directory
+- **File icons** - Visual distinction between files and folders
+- **Click to open** - Click any file in the tree to view it
+- **Toggle sidebar** - Click the `◀` button to hide/show the sidebar
+- **Automatic updates** - Tree view updates when opening files via Ctrl+O
+
+### Source Code Viewer
+
+dogmv can display not only Markdown files but also source code files:
+
+- **Syntax highlighting** - Automatically highlights source code files
+- **Supported formats** - .rs, .py, .js, .ts, .c, .cpp, .h, .java, .go, .sh, and more
+- **GitHub-style rendering** - Clean, professional code display
+- **Same shortcuts** - Use Ctrl+O to open source code files
 
 ### GitHub Flavored Markdown
 
@@ -196,14 +222,14 @@ Relative and absolute image paths are supported:
 ### Known Limitations
 
 1. **Read-only** - dogmv is a viewer only, it cannot edit Markdown files
-2. **No navigation** - No built-in file browser or directory navigation
-3. **Single file** - Can only view one file at a time (use Ctrl+O to switch)
-4. **Task lists** - Checkboxes are display-only, not interactive
+2. **Single file** - Can only view one file at a time (use Ctrl+O or sidebar to switch)
+3. **Task lists** - Checkboxes are display-only, not interactive
+4. **No search** - No built-in search functionality within documents
 
 ## Getting Help
 
 - **Issues**: Report bugs at `<repository-url>/issues`
-- **Documentation**: See README.md and IMPLEMENTATION_PLAN.md
+- **Documentation**: See README.md and docs/DEVELOPER.md
 - **Logs**: Run with `RUST_LOG=debug dogmv <file.md>` for detailed logs
 
 ## Tips & Tricks

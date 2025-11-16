@@ -647,26 +647,35 @@ mod tests {
 
 ---
 
-## 3. プロジェクト構成（最終形）
+## 3. プロジェクト構成（実装済み）
 
 ```
 dogmv/
 ├── src/
-│   ├── main.rs              # エントリポイント
-│   ├── app.rs               # アプリケーション本体
-│   ├── markdown.rs          # Markdownレンダリング
-│   ├── highlight.rs         # シンタックスハイライト
-│   ├── watcher.rs           # ファイル監視
-│   └── ui.rs                # UI構築
+│   ├── main.rs              # アプリケーション起動、UI構築
+│   ├── error.rs             # エラー定義
+│   ├── file_system/         # CLI引数パース
+│   │   ├── mod.rs
+│   │   └── cli.rs
+│   ├── markdown/            # Markdownレンダリング
+│   │   ├── mod.rs
+│   │   └── renderer.rs
+│   ├── models/              # データモデル
+│   │   ├── mod.rs
+│   │   └── file_item.rs
+│   └── ui/                  # UI関連
+│       ├── mod.rs
+│       ├── preview.rs       # プレビュー表示
+│       ├── sidebar.rs       # サイドバートグル
+│       └── tree_view.rs     # ツリービュー
+├── docs/                    # ドキュメント
 ├── Cargo.toml
 ├── Cargo.lock
 ├── flake.nix
 ├── shell.nix
 ├── README.md
 ├── CLAUDE.md
-├── ADR.md
-├── QA.md
-└── IMPLEMENTATION_PLAN.md
+└── test.md
 ```
 
 ---
@@ -691,29 +700,38 @@ dogmv/
 
 ## 5. リスク管理
 
-| リスク | 影響 | 対策 |
-|--------|------|------|
-| webkit2gtk-rsのAPI変更 | 高 | バージョン固定、ドキュメント確認 |
-| syntect統合の複雑性 | 中 | 初期は簡易実装、段階的改善 |
-| notify動作不安定 | 中 | エラーハンドリング強化 |
-| NixOSビルドエラー | 高 | 早期にNix環境でテスト |
-| Wayland固有の問題 | 中 | X11フォールバック検討（後回し） |
+| リスク | 影響 | 対策 | ステータス |
+|--------|------|------|----------|
+| webkit6のAPI変更 | 高 | バージョン固定、ドキュメント確認 | ✅ 解決済み |
+| syntect統合の複雑性 | 中 | 初期は簡易実装、段階的改善 | ✅ 解決済み |
+| notify動作不安定 | 中 | エラーハンドリング強化 | ✅ 解決済み |
+| NixOSビルドエラー | 高 | 早期にNix環境でテスト | ✅ 解決済み |
+| Wayland固有の問題 | 中 | X11フォールバック検討（後回し） | ✅ Wayland安定動作 |
 
 ---
 
-## 6. 次ステップ
+## 6. 実装完了状況
 
-1. **フェーズ1開始**: Rustプロジェクト初期化から着手
-2. **段階的実装**: 各フェーズを順番に完了させる
-3. **継続的テスト**: 各フェーズ終了時に動作確認
-4. **ドキュメント更新**: 実装と並行してドキュメント更新
+✅ **全フェーズ完了** (v0.1.0リリース準備完了)
+
+1. ✅ **フェーズ1-9完了**: すべての主要機能が実装済み
+2. ✅ **段階的実装**: 各フェーズを順番に完了
+3. ✅ **継続的テスト**: 各フェーズ終了時に動作確認済み
+4. ✅ **ドキュメント更新**: ドキュメント整備完了
+
+### 今後の拡張候補
+- ダークモード/ライトモード切り替え
+- カスタムCSSテーマ
+- PDF/HTMLエクスポート
+- 検索機能
+- 目次自動生成
 
 ---
 
 ## 付録: 参考リンク
 
 - [gtk4-rs Documentation](https://gtk-rs.org/gtk4-rs/)
-- [webkit2gtk-rs Documentation](https://docs.rs/webkit2gtk/)
+- [webkit6-rs Documentation](https://docs.rs/webkit6/)
 - [comrak Documentation](https://docs.rs/comrak/)
 - [syntect Documentation](https://docs.rs/syntect/)
 - [notify Documentation](https://docs.rs/notify/)
