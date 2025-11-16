@@ -70,7 +70,7 @@ cargo check
 cargo build
 
 # 実行 (Markdownファイルを指定)
-cargo run test.md
+cargo run examples/test.md
 
 # または、既存のMarkdownファイルを開く
 cargo run README.md
@@ -80,6 +80,8 @@ cargo run README.md
 
 ### ✅ 実装済み
 - Markdownファイルの読み込みと表示
+- **ソースコードビューア** (.rs, .py, .js等のソースコードファイルも表示可能)
+- **サイドバー付きファイルツリービュー** (ディレクトリ構造をツリー表示、トグル可能)
 - GitHub Flavored Markdown対応 (テーブル、タスクリスト、取り消し線等)
 - GitHub風CSSスタイリング
 - 相対パス画像の表示対応
@@ -103,14 +105,33 @@ cargo run README.md
 - [x] フェーズ8: ドキュメント整備
 - [x] フェーズ9: 配布準備
 
+## プロジェクト構成
+
+```
+dogmv/
+├── src/
+│   ├── main.rs              # アプリケーション起動、UI構築
+│   ├── error.rs             # エラー定義
+│   ├── file_system/         # CLI引数パース
+│   ├── markdown/            # Markdownレンダリング
+│   ├── models/              # データモデル
+│   └── ui/                  # UI関連（プレビュー、サイドバー、ツリービュー）
+├── docs/                    # ドキュメント
+├── examples/                # サンプルファイル
+├── Cargo.toml
+├── flake.nix
+├── shell.nix
+└── README.md
+```
+
 ## ドキュメント
 
-- **ユーザーマニュアル**: `USER_MANUAL.md` - 使い方、機能、トラブルシューティング
-- **開発者ドキュメント**: `DEVELOPER.md` - アーキテクチャ、開発手順、貢献ガイド
-- **変更履歴**: `CHANGELOG.md` - バージョン履歴と変更内容
-- **実装計画**: `IMPLEMENTATION_PLAN.md` - 開発ロードマップ
-- **技術決定記録**: `ADR.md` - アーキテクチャ決定理由
-- **開発ログ**: `log.md` - 詳細な開発履歴
+- **ユーザーマニュアル**: `docs/USER_MANUAL.md` - 使い方、機能、トラブルシューティング
+- **開発者ドキュメント**: `docs/DEVELOPER.md` - アーキテクチャ、開発手順、貢献ガイド
+- **変更履歴**: `docs/CHANGELOG.md` - バージョン履歴と変更内容
+- **実装計画**: `docs/IMPLEMENTATION_PLAN.md` - 開発ロードマップ
+- **技術決定記録**: `docs/ADR.md` - アーキテクチャ決定理由
+- **開発ログ**: `docs/log.md` - 詳細な開発履歴
 
 ## ライブプレビュー機能
 
@@ -119,14 +140,14 @@ dogmvは外部エディタで編集中のMarkdownファイルを監視し、自�
 ```bash
 # ターミナル1: dogmvでファイルを開く
 nix-shell
-cargo run test.md
+cargo run examples/test.md
 
 # ターミナル2: 好きなエディタで編集
-vim test.md
+vim examples/test.md
 # または
-code test.md
+code examples/test.md
 
-# test.mdを保存すると、dogmvが自動的にリロードします！
+# ファイルを保存すると、dogmvが自動的にリロードします！
 ```
 
 **動作**:

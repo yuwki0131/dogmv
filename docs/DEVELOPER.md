@@ -77,21 +77,39 @@ dogmv is built using:
 ```
 dogmv/
 ├── src/
-│   └── main.rs              # Main application code (~1059 lines)
+│   ├── main.rs              # Application entry, UI construction
+│   ├── error.rs             # Error definitions
+│   ├── file_system/         # File system operations
+│   │   ├── mod.rs
+│   │   └── cli.rs           # CLI argument parsing
+│   ├── markdown/            # Markdown rendering
+│   │   ├── mod.rs
+│   │   └── renderer.rs      # Markdown & source code rendering
+│   ├── models/              # Data models
+│   │   ├── mod.rs
+│   │   └── file_item.rs     # FileItem for tree view
+│   └── ui/                  # UI components
+│       ├── mod.rs
+│       ├── preview.rs       # Preview pane
+│       ├── sidebar.rs       # Sidebar toggle
+│       └── tree_view.rs     # File tree view
+├── docs/                    # Documentation
+│   ├── USER_MANUAL.md       # End-user documentation
+│   ├── DEVELOPER.md         # This file
+│   ├── IMPLEMENTATION_PLAN.md # Development roadmap
+│   ├── ADR.md               # Architecture Decision Records
+│   ├── QA.md                # Technical Q&A
+│   ├── CHANGELOG.md         # Version history
+│   └── log.md               # Development log
+├── examples/                # Sample files
+│   ├── test.md              # Test markdown file
+│   └── test_highlight.*     # Source code samples
 ├── Cargo.toml               # Rust dependencies
 ├── Cargo.lock               # Locked dependency versions
 ├── flake.nix                # Nix flake for packaging
 ├── shell.nix                # Development environment
 ├── README.md                # Project overview
-├── USER_MANUAL.md           # End-user documentation
-├── DEVELOPER.md             # This file
-├── IMPLEMENTATION_PLAN.md   # Development roadmap
-├── ADR.md                   # Architecture Decision Records
-├── QA.md                    # Technical Q&A (directory tree specs)
-├── CHANGELOG.md             # Version history
-├── log.md                   # Development log
 ├── CLAUDE.md                # Project instructions for AI
-├── test.md                  # Test markdown file
 └── img/
     └── screenshot.png       # Application screenshot
 ```
@@ -190,26 +208,11 @@ RUST_LOG=debug cargo test -- --nocapture
 
 ## Code Organization
 
-### Main Components (src/main.rs ~1059 lines)
+**Current Status**: Codebase is modular and well-organized into separate modules
 
-**Current Status**: All code in single file - requires refactoring for maintainability
+### Module Structure
 
-#### 1. Data Models
-- **AppState** (struct) - Application state container
-  - `current_file`: Currently opened file path
-  - `root_dir`: Root directory for tree view
-  - `webview`: WebView widget reference
-  - `tree_scroll`: Tree view scroll container
-  - `toggle_button`: Sidebar toggle button
-  - `paned`: Paned layout widget
-
-- **FileItem** (GObject subclass) - Tree view item model
-  - `path`: File/directory path
-  - `name`: Display name
-  - `is_dir`: Directory flag
-  - `is_symlink`: Symlink flag
-
-#### 2. UI Construction
+#### 1. src/main.rs - Application Entry Point
 - **main()** - GTK application initialization
 - **build_ui()** - Main UI assembly
   - CSS setup for toggle button
@@ -218,50 +221,60 @@ RUST_LOG=debug cargo test -- --nocapture
   - Sidebar with tree view
   - WebView for preview
   - Keyboard shortcuts setup
-
-#### 3. Directory Tree
-- **create_tree_view()** - TreeListModel + ListView setup
-- **load_directory_items()** - Directory scanning and sorting
-- **setup_file_selection_handler()** - File click handling
-- **FileItem GObject implementation** - Properties macro based
-
-#### 4. Sidebar Toggle
-- **setup_toggle_button_css()** - Flat button CSS
-- **setup_toggle_button()** - Toggle behavior with width preservation
-
-#### 5. Markdown Rendering Pipeline
-- **load_markdown()** - File I/O
-- **render_markdown()** - comrak + syntect integration
-- **create_html()** - HTML wrapper with GitHub-style CSS
-- **display_markdown()** - WebView loading
-- **display_welcome_message()** - Initial screen
-
-#### 6. CLI Argument Parsing
-- **parse_arguments()** - File/directory argument handling
-  - Single file: Opens file, uses parent directory as root
-  - Directory: Uses as root, shows welcome screen
-  - No arguments: Uses current directory
-
-#### 7. File Watching
+- **AppState** (struct) - Application state container
+  - `current_file`: Currently opened file path
+  - `root_dir`: Root directory for tree view
+  - `webview`: WebView widget reference
 - **setup_file_watcher()** - notify-based auto-reload
   - Background thread with inotify
   - 500ms polling in GTK main loop
   - Arc<Mutex<bool>> for thread-safe state
-
-#### 8. Keyboard Shortcuts
 - **setup_keyboard_shortcuts()** - EventControllerKey
   - Ctrl+Q: Quit
   - Ctrl+R: Reload
   - Ctrl+O: Open file dialog
-
-#### 9. File Dialog
 - **open_file_dialog()** - FileChooserDialog
-  - Markdown filter (*.md, *.markdown)
+  - Markdown and source code filters
   - Updates tree view and preview
 
-#### 10. Error Handling
-- **create_error_html()** - Styled error pages
-- Display errors in WebView instead of dialogs
+#### 2. src/error.rs - Error Definitions
+- Custom error types using thiserror
+
+#### 3. src/file_system/ - File System Operations
+- **cli.rs** - CLI argument parsing
+  - `parse_arguments()` - File/directory argument handling
+  - Single file: Opens file, uses parent directory as root
+  - Directory: Uses as root, shows welcome screen
+  - No arguments: Uses current directory
+
+#### 4. src/markdown/ - Markdown Rendering
+- **renderer.rs** - Markdown & source code rendering
+  - `load_markdown()` - File I/O
+  - `render_markdown()` - comrak + syntect integration
+  - `render_source_code()` - Source code syntax highlighting
+  - `create_html()` - HTML wrapper with GitHub-style CSS
+  - `is_markdown_file()` - File type detection
+
+#### 5. src/models/ - Data Models
+- **file_item.rs** - FileItem for tree view
+  - **FileItem** (GObject subclass) - Tree view item model
+    - `path`: File/directory path
+    - `name`: Display name
+    - `is_dir`: Directory flag
+    - `is_symlink`: Symlink flag
+  - GObject implementation using Properties macro
+
+#### 6. src/ui/ - UI Components
+- **preview.rs** - Preview pane
+  - `display_markdown()` - WebView loading for Markdown
+  - `display_welcome_message()` - Initial screen
+- **sidebar.rs** - Sidebar toggle
+  - `setup_toggle_button_css()` - Flat button CSS
+  - `setup_toggle_button()` - Toggle behavior with width preservation
+- **tree_view.rs** - File tree view
+  - `create_tree_view()` - TreeListModel + ListView setup
+  - `load_directory_items()` - Directory scanning and sorting
+  - `setup_file_selection_handler()` - File click handling
 
 ## Key Components
 
