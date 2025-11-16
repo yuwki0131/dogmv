@@ -67,6 +67,9 @@ dogmv/
 │   ├── ADR.md               # アーキテクチャ決定記録
 │   ├── CHANGELOG.md         # 変更履歴
 │   └── ...
+├── examples/                # サンプルファイル
+│   ├── test.md              # Markdownサンプル
+│   └── test_highlight.*     # ソースコードサンプル
 ├── Cargo.toml
 ├── flake.nix
 ├── shell.nix

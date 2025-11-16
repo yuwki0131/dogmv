@@ -70,7 +70,7 @@ cargo check
 cargo build
 
 # 実行 (Markdownファイルを指定)
-cargo run test.md
+cargo run examples/test.md
 
 # または、既存のMarkdownファイルを開く
 cargo run README.md
@@ -117,6 +117,7 @@ dogmv/
 │   ├── models/              # データモデル
 │   └── ui/                  # UI関連（プレビュー、サイドバー、ツリービュー）
 ├── docs/                    # ドキュメント
+├── examples/                # サンプルファイル
 ├── Cargo.toml
 ├── flake.nix
 ├── shell.nix
@@ -139,14 +140,14 @@ dogmvは外部エディタで編集中のMarkdownファイルを監視し、自�
 ```bash
 # ターミナル1: dogmvでファイルを開く
 nix-shell
-cargo run test.md
+cargo run examples/test.md
 
 # ターミナル2: 好きなエディタで編集
-vim test.md
+vim examples/test.md
 # または
-code test.md
+code examples/test.md
 
-# test.mdを保存すると、dogmvが自動的にリロードします！
+# ファイルを保存すると、dogmvが自動的にリロードします！
 ```
 
 **動作**:

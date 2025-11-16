@@ -669,13 +669,15 @@ dogmv/
 │       ├── sidebar.rs       # サイドバートグル
 │       └── tree_view.rs     # ツリービュー
 ├── docs/                    # ドキュメント
+├── examples/                # サンプルファイル
+│   ├── test.md
+│   └── test_highlight.*
 ├── Cargo.toml
 ├── Cargo.lock
 ├── flake.nix
 ├── shell.nix
 ├── README.md
-├── CLAUDE.md
-└── test.md
+└── CLAUDE.md
 ```
 
 ---

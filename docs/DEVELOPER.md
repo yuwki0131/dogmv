@@ -101,13 +101,15 @@ dogmv/
 │   ├── QA.md                # Technical Q&A
 │   ├── CHANGELOG.md         # Version history
 │   └── log.md               # Development log
+├── examples/                # Sample files
+│   ├── test.md              # Test markdown file
+│   └── test_highlight.*     # Source code samples
 ├── Cargo.toml               # Rust dependencies
 ├── Cargo.lock               # Locked dependency versions
 ├── flake.nix                # Nix flake for packaging
 ├── shell.nix                # Development environment
 ├── README.md                # Project overview
 ├── CLAUDE.md                # Project instructions for AI
-├── test.md                  # Test markdown file
 └── img/
     └── screenshot.png       # Application screenshot
 ```
